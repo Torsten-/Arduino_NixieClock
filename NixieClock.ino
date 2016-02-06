@@ -3,9 +3,10 @@
  *
  */
 
-#include "DS1307RTC.h"
-#include "Wire.h"
-#include "Time.h"
+#include <Wire.h>
+//#include <Time.h>
+//#include <DS1307RTC.h>
+#include <Sodaq_DS3231.h>
 //#include "dcf77.h"
 
 //////////////
@@ -13,7 +14,7 @@
 //////////////
 
 // Pin-Settings
-#define PIN_DCF77 A0
+#define PIN_DCF77 A0 // Sind jetzt Taster
 const uint8_t pins_character[] = {4,2,A3,3};
 const uint8_t pins_tubes[]     = {5,A2,A1,7,8,9};
 const uint8_t pins_dots[]      = {6,10};
@@ -32,11 +33,13 @@ const uint8_t char_to_bin[10][4] = {
   {1,0,0,1}
 };
 
+/*
 // DCF77 Settings
 const uint8_t dcf77_inverted_samples = 1;  // ELV = 1, Pollin = 0
 uint8_t dcf77_input_provider() {
   return dcf77_inverted_samples ^ (analogRead(PIN_DCF77) > 200);
 }
+*/
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -57,8 +60,10 @@ void setup() {
   }
   
   pinMode(PIN_DCF77, INPUT);
+
+  rtc.begin();
   
-  setTime(RTC.get());
+  //setTime(RTC.get());
   
 /*
   // DCF77
@@ -97,24 +102,31 @@ void loop() {
     RTC.set(now());
   }
  */
-
-  // Set time with switches
-  int switches = analogRead(PIN_DCF77);
-  if(switches < 700){
-    if(switches > 547 && !button_pressed){ // Hour
-      adjustTime(3600);
-      RTC.set(now());
-    }else if(switches > 410 && !button_pressed){ // Minute
-      adjustTime(60);
-      RTC.set(now());    
-    }else if(!button_pressed){  // Second
-      adjustTime(1);
-      RTC.set(now());
-    }
-    button_pressed = true;
-  }else button_pressed = false;
   
   // Get time from RTC
+  uint8_t display_value[6] = {0,0,0,0,0,0};
+  DateTime now = rtc.now();
+  display_value[5] = now.hour()/10;
+  display_value[4] = now.hour()%10;
+  display_value[3] = now.minute()/10;
+  display_value[2] = now.minute()%10;
+  display_value[1] = now.second()/10;
+  display_value[0] = now.second()%10;
+  
+  /*
+  uint8_t display_value[6] = {0,0,0,0,0,0};
+  tmElements_t tm;
+  if (RTC.read(tm)) {
+    display_value[5] = tm.Hour/10;
+    display_value[4] = tm.Hour%10;
+    display_value[3] = tm.Minute/10;
+    display_value[2] = tm.Minute%10;
+    display_value[1] = tm.Second/10;
+    display_value[0] = tm.Second%10;
+  }
+  */
+
+  /*
   time_t rtc_time = RTC.get();
   uint8_t display_value[6] = {0,0,0,0,0,0};
   display_value[5] = hour(rtc_time)/10;
@@ -123,7 +135,22 @@ void loop() {
   display_value[2] = minute(rtc_time)%10;
   display_value[1] = second(rtc_time)/10;
   display_value[0] = second(rtc_time)%10;
- 
+  */
+
+
+  // Set time with switches
+  int switches = analogRead(PIN_DCF77);
+  if(switches < 700){
+   if(switches > 547 && !button_pressed){ // Hour
+      rtc.setDateTime(now.get()+3600);
+    }else if(switches > 410 && !button_pressed){ // Minute
+      rtc.setDateTime(now.get()+60);
+    }else if(!button_pressed){  // Second
+      rtc.setDateTime(now.get()+1);
+    }
+    button_pressed = true;
+  }else button_pressed = false;
+   
   // Show Value on Tubes
   multiplex(display_value); 
 }
@@ -151,6 +178,6 @@ void multiplex(uint8_t *display_value) {
       digitalWrite(pins_dots[0],LOW);
       digitalWrite(pins_dots[1],LOW);
     }
-*/
+    */
   }
 }
