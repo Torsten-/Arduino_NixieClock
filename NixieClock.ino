@@ -3,15 +3,16 @@
  *
  */
 
-#include <Wire.h>
-#include <Sodaq_DS3231.h>
+#include <DS3232RTC.h>    //http://github.com/JChristensen/DS3232RTC
+#include <Time.h>         //http://www.arduino.cc/playground/Code/Time  
+#include <Wire.h>         //http://arduino.cc/en/Reference/Wire (included with Arduino IDE)
 
 //////////////
 // Settings //
 //////////////
 
 // Pin-Settings
-#define PIN_DCF77 A0 // Sind jetzt Taster
+#define PIN_SWITCHES A0
 const uint8_t pins_character[] = {4,2,A3,3};
 const uint8_t pins_tubes[]     = {5,A2,A1,7,8,9};
 const uint8_t pins_dots[]      = {6,10};
@@ -32,6 +33,7 @@ const uint8_t char_to_bin[10][4] = {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+
 ///////////
 // Setup //
 ///////////
@@ -48,44 +50,38 @@ void setup() {
     pinMode(pins_dots[i], OUTPUT);
   }
   
-  pinMode(PIN_DCF77, INPUT);
+  pinMode(PIN_SWITCHES, INPUT);
 
-  rtc.begin();
+  setSyncProvider(RTC.get);   // the function to get the time from the RTC
 }
 
 //////////
 // Loop //
 //////////
 bool button_pressed = false;
-unsigned long last_get = 0;
 uint8_t display_value[6] = {0,0,0,0,0,0};
 
 void loop() {
-  // Nur jede Sekunde die Zeit abfragen
-  if(millis() > last_get+1000 || millis() < last_get){
-    // Get time from RTC
-    DateTime now = rtc.now();
-    display_value[5] = now.hour()/10;
-    display_value[4] = now.hour()%10;
-    display_value[3] = now.minute()/10;
-    display_value[2] = now.minute()%10;
-    display_value[1] = now.second()/10;
-    display_value[0] = now.second()%10;
-    last_get = millis();
-  }
+  display_value[5] = hour()/10;
+  display_value[4] = hour()%10;
+  display_value[3] = minute()/10;
+  display_value[2] = minute()%10;
+  display_value[1] = second()/10;
+  display_value[0] = second()%10;
 
   // Set time with switches
-  int switches = analogRead(PIN_DCF77);
+  int switches = analogRead(PIN_SWITCHES);
   if(switches < 700){
-    DateTime now = rtc.now();
-    last_get = 0;
+    time_t new_time = now();
     if(switches > 547 && !button_pressed){ // Hour
-      rtc.setDateTime(now.get()+3600);
+      new_time += 3600;
     }else if(switches > 410 && !button_pressed){ // Minute
-      rtc.setDateTime(now.get()+60);
+      new_time += 60;
     }else if(!button_pressed){  // Second
-      rtc.setDateTime(now.get()+1);
+      new_time += 1;
     }
+    RTC.set(new_time);
+    setTime(new_time);
     button_pressed = true;
   }else button_pressed = false;
    
