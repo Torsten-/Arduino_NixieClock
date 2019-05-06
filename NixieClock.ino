@@ -3,19 +3,33 @@
  *
  */
 
-#include <DS3232RTC.h>    //http://github.com/JChristensen/DS3232RTC
-#include <Time.h>         //http://www.arduino.cc/playground/Code/Time  
-#include <Wire.h>         //http://arduino.cc/en/Reference/Wire (included with Arduino IDE)
+#include <TimeLib.h>      //https://github.com/PaulStoffregen/Time
+#include <ESP8266WiFi.h>
+#include <WiFiUdp.h>
+#include <Timezone.h> // https://github.com/JChristensen/Timezone
+
+WiFiUDP Udp;
+unsigned int localPort = 8888;  // local port to listen for UDP packets
 
 //////////////
 // Settings //
 //////////////
 
+// WiFi
+const char ssid[] = "Magrathea";  //  your network SSID (name)
+const char pass[] = "XXX";       // your network password
+
+// NTP Server
+static const char ntpServerName[] = "us.pool.ntp.org";
+time_t syncInterval = 3600; // in Seconds
+
+// Timezone
+TimeChangeRule myDST = {"MESZ", Last, Sun, Mar, 2, 120};    //Daylight time = UTC - 4 hours
+TimeChangeRule mySTD = {"MEZ",  Last, Sun, Oct, 2,  60};     //Standard time = UTC - 5 hours
+
 // Pin-Settings
-#define PIN_SWITCHES A0
-const uint8_t pins_character[] = {4,2,A3,3};
-const uint8_t pins_tubes[]     = {5,A2,A1,7,8,9};
-const uint8_t pins_dots[]      = {6,10};
+const uint8_t pins_character[] = {16,14,12,13};
+const uint8_t pins_tubes[]     = {3,5,4,0,2,15};
 
 // Number 0-9 to binary value for SN74141 decoder
 const uint8_t char_to_bin[10][4] = {
@@ -46,19 +60,23 @@ void setup() {
     pinMode(pins_tubes[i], OUTPUT);
     digitalWrite(pins_tubes[i],LOW);
   }
-  for(uint8_t i=0; i<2; i++){
-    pinMode(pins_dots[i], OUTPUT);
-  }
-  
-  pinMode(PIN_SWITCHES, INPUT);
 
-  setSyncProvider(RTC.get);   // the function to get the time from the RTC
+
+  WiFi.begin(ssid, pass);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+  }
+
+  Udp.begin(localPort);
+  
+  setSyncProvider(getNtpTime);
+  setSyncInterval(syncInterval);
 }
 
 //////////
 // Loop //
 //////////
-bool button_pressed = false;
 uint8_t display_value[6] = {0,0,0,0,0,0};
 
 void loop() {
@@ -69,22 +87,6 @@ void loop() {
   display_value[1] = second()/10;
   display_value[0] = second()%10;
 
-  // Set time with switches
-  int switches = analogRead(PIN_SWITCHES);
-  if(switches < 700){
-    time_t new_time = now();
-    if(switches > 547 && !button_pressed){ // Hour
-      new_time += 3600;
-    }else if(switches > 410 && !button_pressed){ // Minute
-      new_time += 60;
-    }else if(!button_pressed){  // Second
-      new_time += 1;
-    }
-    RTC.set(new_time);
-    setTime(new_time);
-    button_pressed = true;
-  }else button_pressed = false;
-   
   // Show Value on Tubes
   multiplex(display_value); 
 }
@@ -102,16 +104,66 @@ void multiplex(uint8_t *display_value) {
     digitalWrite(pins_tubes[t],HIGH);
     delay(2);
     digitalWrite(pins_tubes[t],LOW);
-
-/*
-    // Dots
-    if(display_value[0] % 2){
-      digitalWrite(pins_dots[0],HIGH);
-      digitalWrite(pins_dots[1],HIGH);
-    }else{
-      digitalWrite(pins_dots[0],LOW);
-      digitalWrite(pins_dots[1],LOW);
-    }
-    */
   }
+}
+
+
+//////////////
+// NTP Code //
+//////////////
+const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
+byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
+
+Timezone myTZ(myDST, mySTD);
+TimeChangeRule *tcr; //pointer to the time change rule
+
+time_t getNtpTime()
+{
+  IPAddress ntpServerIP; // NTP server's ip address
+
+  while (Udp.parsePacket() > 0) ; // discard any previously received packets
+
+  WiFi.hostByName(ntpServerName, ntpServerIP);
+  sendNTPpacket(ntpServerIP);
+  uint32_t beginWait = millis();
+  
+  while (millis() - beginWait < 1500) {
+    int size = Udp.parsePacket();
+    if (size >= NTP_PACKET_SIZE) {
+      Udp.read(packetBuffer, NTP_PACKET_SIZE);  // read packet into the buffer
+      unsigned long secsSince1900;
+      // convert four bytes starting at location 40 to a long integer
+      secsSince1900 =  (unsigned long)packetBuffer[40] << 24;
+      secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
+      secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
+      secsSince1900 |= (unsigned long)packetBuffer[43];
+//      return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
+//      return secsSince1900 - 2208988800UL;
+      return myTZ.toLocal(secsSince1900 - 2208988800UL, &tcr);
+    }
+  }
+  return 0; // return 0 if unable to get the time
+}
+
+// send an NTP request to the time server at the given address
+void sendNTPpacket(IPAddress &address)
+{
+  // set all bytes in the buffer to 0
+  memset(packetBuffer, 0, NTP_PACKET_SIZE);
+  // Initialize values needed to form NTP request
+  // (see URL above for details on the packets)
+  packetBuffer[0] = 0b11100011;   // LI, Version, Mode
+  packetBuffer[1] = 0;     // Stratum, or type of clock
+  packetBuffer[2] = 6;     // Polling Interval
+  packetBuffer[3] = 0xEC;  // Peer Clock Precision
+  // 8 bytes of zero for Root Delay & Root Dispersion
+  packetBuffer[12] = 49;
+  packetBuffer[13] = 0x4E;
+  packetBuffer[14] = 49;
+  packetBuffer[15] = 52;
+  // all NTP fields have been given values, now
+  // you can send a packet requesting a timestamp:
+  Udp.beginPacket(address, 123); //NTP requests are to port 123
+  Udp.write(packetBuffer, NTP_PACKET_SIZE);
+  Udp.endPacket();
 }
