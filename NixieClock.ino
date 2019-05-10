@@ -5,19 +5,23 @@
 
 #include <TimeLib.h>      //https://github.com/PaulStoffregen/Time
 #include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <EEPROM.h>
 #include <WiFiUdp.h>
 #include <Timezone.h> // https://github.com/JChristensen/Timezone
 
 WiFiUDP Udp;
 unsigned int localPort = 8888;  // local port to listen for UDP packets
+ESP8266WebServer server(80);
+String scanned_wifis;
+String html;
+bool wifi_connected = false;
+String eeprom_ssid;
+String eeprom_pass = "";
 
 //////////////
 // Settings //
 //////////////
-
-// WiFi
-const char ssid[] = "Magrathea";  //  your network SSID (name)
-const char pass[] = "XXX";       // your network password
 
 // NTP Server
 static const char ntpServerName[] = "us.pool.ntp.org";
@@ -61,17 +65,44 @@ void setup() {
     digitalWrite(pins_tubes[i],LOW);
   }
 
+  EEPROM.begin(512);
+  delay(10);
 
-  WiFi.begin(ssid, pass);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+  for(int i = 0; i < 32; i++){
+    int val = EEPROM.read(i);
+    if(val == 0) break;
+    eeprom_ssid += char(EEPROM.read(i));
   }
 
-  Udp.begin(localPort);
-  
-  setSyncProvider(getNtpTime);
-  setSyncInterval(syncInterval);
+  for(int i = 32; i < 96; i++) {
+    int val = EEPROM.read(i);
+    if(val == 0) break;
+    eeprom_pass += char(EEPROM.read(i));
+  }
+
+  if(eeprom_ssid.length() > 1 ){
+    WiFi.begin(eeprom_ssid.c_str(), eeprom_pass.c_str());
+
+    for(int i = 0; i < 20; i++){
+      if(WiFi.status() == WL_CONNECTED){
+        wifi_connected = true;
+        break;
+      }else{
+        delay(500);
+      }
+    }
+  }
+
+  if(wifi_connected){
+    Udp.begin(localPort);
+
+    setSyncProvider(getNtpTime);
+    setSyncInterval(syncInterval);
+  }else{
+    setupAP();
+  }
+
+  startWebServer();
 }
 
 //////////
@@ -80,15 +111,26 @@ void setup() {
 uint8_t display_value[6] = {0,0,0,0,0,0};
 
 void loop() {
-  display_value[5] = hour()/10;
-  display_value[4] = hour()%10;
-  display_value[3] = minute()/10;
-  display_value[2] = minute()%10;
-  display_value[1] = second()/10;
-  display_value[0] = second()%10;
+  if(wifi_connected){
+    display_value[5] = hour()/10;
+    display_value[4] = hour()%10;
+    display_value[3] = minute()/10;
+    display_value[2] = minute()%10;
+    display_value[1] = second()/10;
+    display_value[0] = second()%10;
+  }else{
+    display_value[5] = 4;
+    display_value[4] = 2;
+    display_value[3] = 0;
+    display_value[2] = 0;
+    display_value[1] = 2;
+    display_value[0] = 3;
+  }
 
   // Show Value on Tubes
-  multiplex(display_value); 
+  multiplex(display_value);
+
+  server.handleClient();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -107,6 +149,87 @@ void multiplex(uint8_t *display_value) {
   }
 }
 
+///////////////
+// WiFi Code //
+///////////////
+void setupAP(void){
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  
+  delay(100);
+  
+  int n = WiFi.scanNetworks();
+
+  scanned_wifis = "<ol>";
+  for (int i = 0; i < n; i++){
+    scanned_wifis += "<li>";
+    scanned_wifis += WiFi.SSID(i);
+    scanned_wifis += "</li>";
+  }
+  scanned_wifis += "</ol>";
+  
+  delay(100);
+  
+  WiFi.softAP("Nixie","");
+}
+
+void startWebServer(){
+  server.on("/", []() {
+    IPAddress ip = WiFi.softAPIP();
+    html = "<html><head><title>Nixie</title></head><body>";
+    html += "<h3>Nixie</h3>";
+    html += "<p>";
+    html += scanned_wifis;
+    html += "</p><form method='get' action='save'>";
+    html += "WLAN Name: <input name='ssid' value='";
+    html += eeprom_ssid;
+    html += "'><br>";
+    html += "WLAN Passwort: <input name='pass' value='";
+    html += eeprom_pass;
+    html += "'><br>";
+    html += "<input type='submit' value='speichern'></form>";
+    html += "<form method='get' action='clear'><input type='submit' value='zur&uuml;cksetzen'></form>";
+    html += "</body></html>";
+    server.send(200, "text/html", html);
+  });
+  server.on("/save", []() {
+    String new_ssid = server.arg("ssid");
+    String new_pass = server.arg("pass");
+
+    for (int i = 0; i < 96; ++i) { EEPROM.write(i, 0); } // Clear EEPROM
+
+    for (int i = 0; i < new_ssid.length(); i++){
+      EEPROM.write(i, new_ssid[i]);
+    }
+
+    for (int i = 0; i < new_pass.length(); i++){
+      EEPROM.write(32+i, new_pass[i]);
+    }    
+
+    EEPROM.commit();
+
+    html = "<html><head><title>Nixie</title></head><body>";
+    html += "<h3>Nixie</h3>";
+    html += "Einstellungen gespeichert - bitte Uhr restarten (Stecker ziehen).";
+    html += "</body></html>";
+    server.send(200, "text/html", html);
+  });
+
+  server.on("/clear", []() {
+    for (int i = 0; i < 96; i++) { 
+      EEPROM.write(i, 0);
+    }
+    EEPROM.commit();
+    
+    html = "<html><head><title>Nixie</title></head><body>";
+    html += "<h3>Nixie</h3>";
+    html += "Einstellungen zur&uuml;ckgesetzt - bitte Uhr restarten (Stecker ziehen).";
+    html += "</body></html>";
+    server.send(200, "text/html", html);
+  });
+
+  server.begin();
+}
 
 //////////////
 // NTP Code //
