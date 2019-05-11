@@ -3,6 +3,8 @@
  *
  */
 
+#define VERSION "19.05"
+
 #include <TimeLib.h>      //https://github.com/PaulStoffregen/Time
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
@@ -11,25 +13,26 @@
 #include <Timezone.h> // https://github.com/JChristensen/Timezone
 
 WiFiUDP Udp;
-unsigned int localPort = 8888;  // local port to listen for UDP packets
 ESP8266WebServer server(80);
 String scanned_wifis;
 String html;
 bool wifi_connected = false;
 String eeprom_ssid;
-String eeprom_pass = "";
+String eeprom_pass;
+String eeprom_ntpServer;
+byte eeprom_offset;
+byte eeprom_summertime;
+int eeprom_syncInterval;
+int eeprom_multiplexInterval;
+byte eeprom_configWritten; // 42 = yes
 
 //////////////
 // Settings //
 //////////////
 
-// NTP Server
-static const char ntpServerName[] = "us.pool.ntp.org";
-time_t syncInterval = 3600; // in Seconds
-
 // Timezone
-TimeChangeRule myDST = {"MESZ", Last, Sun, Mar, 2, 120};    //Daylight time = UTC - 4 hours
-TimeChangeRule mySTD = {"MEZ",  Last, Sun, Oct, 2,  60};     //Standard time = UTC - 5 hours
+TimeChangeRule myDST = {"MESZ", Last, Sun, Mar, 2, 60}; // Daylight time
+TimeChangeRule mySTD = {"MEZ",  Last, Sun, Oct, 2,  0}; // Standard time
 
 // Pin-Settings
 const uint8_t pins_character[] = {16,14,12,13};
@@ -67,20 +70,63 @@ void setup() {
 
   EEPROM.begin(512);
   delay(10);
+  
+  // EEPROM: Config Written?
+  eeprom_configWritten = EEPROM.read(500);
+  
+  if(eeprom_configWritten == 42){ // Yes
+    // EEPROM: SSID
+    for(int i = 0; i < 32; i++){
+      int val = EEPROM.read(i);
+      if(val == 0) break;
+      eeprom_ssid += char(val);
+    }
 
-  for(int i = 0; i < 32; i++){
-    int val = EEPROM.read(i);
-    if(val == 0) break;
-    eeprom_ssid += char(EEPROM.read(i));
+    // EEPROM: Password
+    for(int i = 32; i < 96; i++) {
+      int val = EEPROM.read(i);
+      if(val == 0) break;
+      eeprom_pass += char(val);
+    }
+
+    // EEPROM: ntpServer
+    for(int i = 96; i < 128; i++) {
+      int val = EEPROM.read(i);
+      if(val == 0) break;
+      eeprom_ntpServer += char(val);
+    }
+
+    // EEPROM: Offset
+    eeprom_offset = EEPROM.read(128);
+  
+    // EEPROM: Summertime
+    eeprom_summertime = EEPROM.read(129);
+
+    byte low, high;
+    // EEPROM: SynvInterval
+    low = EEPROM.read(130);
+    high = EEPROM.read(131);
+    eeprom_syncInterval = low + ((high << 8)&0xFF00);
+    if(eeprom_syncInterval <= 0) eeprom_syncInterval = 720;
+
+    // EEPROM: MultiplexInterval
+    low = EEPROM.read(132);
+    high = EEPROM.read(133);
+    eeprom_multiplexInterval = low + ((high << 8)&0xFF00);
+    if(eeprom_multiplexInterval <= 0) eeprom_multiplexInterval = 1500;
+  }else{
+    eeprom_ssid = "";
+    eeprom_pass = "";
+    eeprom_ntpServer = "pool.ntp.org";
+    eeprom_offset = 1;
+    eeprom_summertime = 1;
+    eeprom_syncInterval = 720;
+    eeprom_multiplexInterval = 1500;
   }
-
-  for(int i = 32; i < 96; i++) {
-    int val = EEPROM.read(i);
-    if(val == 0) break;
-    eeprom_pass += char(EEPROM.read(i));
-  }
-
-  if(eeprom_ssid.length() > 1 ){
+ 
+  // Connect to WiFi
+  WiFi.hostname("nixie");
+  if(eeprom_ssid.length() > 1){
     WiFi.begin(eeprom_ssid.c_str(), eeprom_pass.c_str());
 
     for(int i = 0; i < 20; i++){
@@ -94,10 +140,10 @@ void setup() {
   }
 
   if(wifi_connected){
-    Udp.begin(localPort);
+    Udp.begin(8888);
 
     setSyncProvider(getNtpTime);
-    setSyncInterval(syncInterval);
+    setSyncInterval(eeprom_syncInterval*60);
   }else{
     setupAP();
   }
@@ -119,18 +165,18 @@ void loop() {
     display_value[1] = second()/10;
     display_value[0] = second()%10;
   }else{
-    display_value[5] = 4;
-    display_value[4] = 2;
-    display_value[3] = 0;
+    display_value[5] = 0;
+    display_value[4] = 0;
+    display_value[3] = 4;
     display_value[2] = 0;
-    display_value[1] = 2;
-    display_value[0] = 3;
+    display_value[1] = 0;
+    display_value[0] = 1;
   }
 
   // Show Value on Tubes
   multiplex(display_value);
 
-  server.handleClient();
+  server.handleClient(); // Webserver
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -144,8 +190,8 @@ void multiplex(uint8_t *display_value) {
       digitalWrite(pins_character[i],char_to_bin[display_value[t]][i]);
     }
     digitalWrite(pins_tubes[t],HIGH);
-    delay(2);
-    digitalWrite(pins_tubes[t],LOW);
+    delayMicroseconds(eeprom_multiplexInterval);
+    digitalWrite(pins_tubes[t],LOW);    
   }
 }
 
@@ -162,9 +208,11 @@ void setupAP(void){
 
   scanned_wifis = "<ol>";
   for (int i = 0; i < n; i++){
-    scanned_wifis += "<li>";
+    scanned_wifis += "<li><a href='#' onClick=\"document.getElementById('ssid').value = '";
     scanned_wifis += WiFi.SSID(i);
-    scanned_wifis += "</li>";
+    scanned_wifis += "'\">";
+    scanned_wifis += WiFi.SSID(i);
+    scanned_wifis += "</a></li>";
   }
   scanned_wifis += "</ol>";
   
@@ -177,55 +225,112 @@ void startWebServer(){
   server.on("/", []() {
     IPAddress ip = WiFi.softAPIP();
     html = "<html><head><title>Nixie</title></head><body>";
-    html += "<h3>Nixie</h3>";
+    html += "<h3>Nixie v";
+    html += VERSION;
+    html += "</h3>";
     html += "<p>";
     html += scanned_wifis;
-    html += "</p><form method='get' action='save'>";
-    html += "WLAN Name: <input name='ssid' value='";
+    html += "</p><form method='post' action='save'><table>";
+    html += "<tr><td>WLAN Name:</td><td><input name='ssid' id='ssid' value='";
     html += eeprom_ssid;
-    html += "'><br>";
-    html += "WLAN Passwort: <input name='pass' value='";
-    html += eeprom_pass;
-    html += "'><br>";
-    html += "<input type='submit' value='speichern'></form>";
-    html += "<form method='get' action='clear'><input type='submit' value='zur&uuml;cksetzen'></form>";
-    html += "</body></html>";
+    html += "'></td></tr>";
+    html += "<tr><td>WLAN Passwort:</td><td><input name='pass' type='password' value='";
+    if(eeprom_pass.length() > 0) html += "***";
+    html += "'></td></tr>";
+    html += "<tr><td colspan='2'><a href='#' onClick=\"document.getElementById('hidden1').style.display='table-row'; document.getElementById('hidden2').style.display='table-row'; document.getElementById('hidden3').style.display='table-row'; document.getElementById('hidden4').style.display='table-row'; document.getElementById('hidden5').style.display='table-row';\">Advanced Config</a></td></tr>";
+    html += "<tr id='hidden1' style='display: none'><td>NTP Server:</td><td><input name='ntpServer' value='";
+    html += eeprom_ntpServer;
+    html += "'></td></tr>";
+    html += "<tr id='hidden2' style='display: none'><td>Offset zu GMT (h):</td><td><input name='offset' value='";
+    html += eeprom_offset;
+    html += "'></td></tr>";
+    html += "<tr id='hidden3' style='display: none'><td>Wechsel Sommer/Winterzeit:</td><td><input type='checkbox' name='summertime' value='1'";
+    if(eeprom_summertime == 1) html += " checked";
+    html += "></td></tr>";
+    html += "<tr id='hidden4' style='display: none'><td>NTP SyncInterval (min):</td><td><input name='syncInterval' value='";
+    html += eeprom_syncInterval;
+    html += "'></td></tr>";
+    html += "<tr id='hidden5' style='display: none'><td>Multiplex Leuchtdauer:</td><td><input name='multiplexInterval' value='";
+    html += eeprom_multiplexInterval;
+    html += "'></td></tr>";
+    html += "<tr><td><input type='submit' value='speichern'></form></td>";
+    html += "<td><form method='post' action='clear' style='display:inline'><input type='submit' value='zur&uuml;cksetzen'></form></td></tr>";
+    html += "</table></body></html>";
     server.send(200, "text/html", html);
   });
   server.on("/save", []() {
     String new_ssid = server.arg("ssid");
     String new_pass = server.arg("pass");
+    String new_ntpServer = server.arg("ntpServer");
+    byte new_offset = server.arg("offset").toInt();
+    byte new_summertime = server.arg("summertime").toInt();
+    int new_syncInterval = server.arg("syncInterval").toInt();
+    int new_multiplexInterval = server.arg("multiplexInterval").toInt();
+    
+    for (int i = 0; i < 501; ++i) { EEPROM.write(i, 0); } // Clear EEPROM
 
-    for (int i = 0; i < 96; ++i) { EEPROM.write(i, 0); } // Clear EEPROM
-
+    // EEPROM: SSID
     for (int i = 0; i < new_ssid.length(); i++){
       EEPROM.write(i, new_ssid[i]);
     }
 
+    // EEPROM: Password
+    if(new_pass == "***") new_pass = eeprom_pass;   
     for (int i = 0; i < new_pass.length(); i++){
       EEPROM.write(32+i, new_pass[i]);
     }    
 
+    // EEPROM: ntpServer
+    for (int i = 0; i < new_ntpServer.length(); i++){
+      EEPROM.write(96+i, new_ntpServer[i]);
+    }
+
+    // EEPROM: Offset
+    EEPROM.write(128, new_offset);
+
+    // EEPROM: Summertime
+    EEPROM.write(129, new_summertime);
+
+    byte low, high;
+    // EEPROM: SynvInterval
+    low=new_syncInterval&0xFF;
+    high=(new_syncInterval>>8)&0xFF;
+    EEPROM.write(130, low);
+    EEPROM.write(131, high);
+
+    // EEPROM: MultiplexInterval
+    low=new_multiplexInterval&0xFF;
+    high=(new_multiplexInterval>>8)&0xFF;
+    EEPROM.write(132, low);
+    EEPROM.write(133, high);
+
+    EEPROM.write(500,42); // Config Written = yes
     EEPROM.commit();
 
-    html = "<html><head><title>Nixie</title></head><body>";
+    html = "<html><head><title>Nixie</title><meta http-equiv='refresh' content='10; url=/'></head><body>";
     html += "<h3>Nixie</h3>";
-    html += "Einstellungen gespeichert - bitte Uhr restarten (Stecker ziehen).";
+    html += "Einstellungen gespeichert - starte neu..<br>";
+    html += "(wenn es nicht funktioniert, Uhr bitte hart restarten (Stecker ziehen))";
     html += "</body></html>";
     server.send(200, "text/html", html);
+    delay(100);
+    ESP.restart();
   });
 
   server.on("/clear", []() {
-    for (int i = 0; i < 96; i++) { 
+    for (int i = 0; i < 501; i++) { 
       EEPROM.write(i, 0);
     }
     EEPROM.commit();
     
-    html = "<html><head><title>Nixie</title></head><body>";
+    html = "<html><head><title>Nixie</title><meta http-equiv='refresh' content='10; url=/'></head><body>";
     html += "<h3>Nixie</h3>";
-    html += "Einstellungen zur&uuml;ckgesetzt - bitte Uhr restarten (Stecker ziehen).";
+    html += "Einstellungen zur&uuml;ckgesetzt - starte neu..<br>";
+    html += "(wenn es nicht funktioniert, Uhr bitte hart restarten (Stecker ziehen))";
     html += "</body></html>";
     server.send(200, "text/html", html);
+    delay(100);
+    ESP.restart();
   });
 
   server.begin();
@@ -243,6 +348,9 @@ TimeChangeRule *tcr; //pointer to the time change rule
 time_t getNtpTime()
 {
   IPAddress ntpServerIP; // NTP server's ip address
+  
+  char ntpServerName[eeprom_ntpServer.length()];
+  eeprom_ntpServer.toCharArray(ntpServerName,eeprom_ntpServer.length()+1);
 
   while (Udp.parsePacket() > 0) ; // discard any previously received packets
 
@@ -260,9 +368,8 @@ time_t getNtpTime()
       secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
       secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
       secsSince1900 |= (unsigned long)packetBuffer[43];
-//      return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
-//      return secsSince1900 - 2208988800UL;
-      return myTZ.toLocal(secsSince1900 - 2208988800UL, &tcr);
+      if(eeprom_summertime == 1) return myTZ.toLocal(secsSince1900 - 2208988800UL + eeprom_offset * SECS_PER_HOUR, &tcr);
+      else return secsSince1900 - 2208988800UL + eeprom_offset * SECS_PER_HOUR;
     }
   }
   return 0; // return 0 if unable to get the time
