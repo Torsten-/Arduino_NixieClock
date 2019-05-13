@@ -3,7 +3,7 @@
  *
  */
 
-#define VERSION "19.05"
+#define VERSION "19.05.1"
 
 #include <TimeLib.h>      //https://github.com/PaulStoffregen/Time
 #include <ESP8266WiFi.h>
@@ -224,7 +224,7 @@ void setupAP(void){
 void startWebServer(){
   server.on("/", []() {
     IPAddress ip = WiFi.softAPIP();
-    html = "<html><head><title>Nixie</title></head><body>";
+    html = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Nixie</title></head><body>";
     html += "<h3>Nixie v";
     html += VERSION;
     html += "</h3>";
