@@ -3,7 +3,7 @@
  *
  */
 
-#define VERSION "19.05.1"
+#define VERSION "19.05.2"
 
 #include <TimeLib.h>      //https://github.com/PaulStoffregen/Time
 #include <ESP8266WiFi.h>
@@ -127,6 +127,8 @@ void setup() {
   // Connect to WiFi
   WiFi.hostname("nixie");
   if(eeprom_ssid.length() > 1){
+    WiFi.disconnect();
+    WiFi.mode(WIFI_STA);
     WiFi.begin(eeprom_ssid.c_str(), eeprom_pass.c_str());
 
     for(int i = 0; i < 20; i++){
