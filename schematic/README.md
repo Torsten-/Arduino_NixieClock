@@ -6,7 +6,7 @@ N1, N2, N3, N4, N5, N6 | Nixie IN-14 | 6 |
 SR50 | MCP1703-50 | 1 | 
 SR33 | MCP1703-33 | 1 | 
 ESP-07/12 | ESP-07 | 1 | 
-IC1<br/>  | SN74141 / K155ID1<br/>IC-Sockel 16-polig | 1<br/>1 | 
+IC1<br/>  | SN74141 / K155ID1<br/>IC-Sockel 16-polig | 1<br/>1 | <br/>[GS 16](https://www.reichelt.de/ic-sockel-16-polig-doppelter-federkontakt-gs-16-p8208.html)
 PROG | Printtaster | 1 | 
 POWER | Stiftleiste RM 2,54 1x3-pol | 1 | 
 SERIAL | Stiftleiste RM 2,54 1x5-pol | 1 | 
