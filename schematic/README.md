@@ -2,9 +2,9 @@
 
 Name | Typ | Anzahl | Link
 -----|------|--------| -----
-  | 12V Power Supply | 1 | 
-  | Einbaubuchse für Hohlstecker 5,5/2,1 | 1 | [DC 072341L](https://www.reichelt.de/einbaubuchse-aussen-5-6-mm-innen-2-1-mm-dc-072341l-p196470.html)
-  | Nixie Power Supply | 1 | ebay?
+     | 12V Power Supply | 1 | 
+     | Einbaubuchse für Hohlstecker 5,5/2,1 | 1 | [DC 072341L](https://www.reichelt.de/einbaubuchse-aussen-5-6-mm-innen-2-1-mm-dc-072341l-p196470.html)
+     | Nixie Power Supply | 1 | ebay?
 N1, N2, N3, N4, N5, N6 | Nixie IN-14 | 6 | ebay?
 SR50 | MCP1702-50 | 1 |  [MCP 1702-5002](https://www.reichelt.de/ldo-regler-fest-5-v-to-92-mcp-1702-5002-p90115.html)
 SR33 | MCP1702-33 | 1 | [MCP 1702-3302](https://www.reichelt.de/ldo-regler-fest-3-3-v-to-92-mcp-1702-3302-p90114.html)
