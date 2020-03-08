@@ -3,7 +3,7 @@
  *
  */
 
-#define VERSION "19.05.2"
+#define VERSION "20.03.1"
 
 #include <TimeLib.h>      //https://github.com/PaulStoffregen/Time
 #include <ESP8266WiFi.h>
@@ -35,10 +35,13 @@ TimeChangeRule myDST = {"MESZ", Last, Sun, Mar, 2, 60}; // Daylight time
 TimeChangeRule mySTD = {"MEZ",  Last, Sun, Oct, 2,  0}; // Standard time
 
 // Pin-Settings
-const uint8_t pins_character[] = {16,14,12,13};
+//const uint8_t pins_character[] = {16,14,12,13};  // Needed for POC-Clock with other Pin-Layout
+const uint8_t pins_character[] = {13,12,14,16};  // A, B, C, D
 const uint8_t pins_tubes[]     = {3,5,4,0,2,15};
 
 // Number 0-9 to binary value for SN74141 decoder
+/* 
+// Needed for POC-Clock with other Pin-Layout
 const uint8_t char_to_bin[10][4] = {
   {0,0,0,0},
   {1,0,0,0},
@@ -50,6 +53,19 @@ const uint8_t char_to_bin[10][4] = {
   {1,1,1,0},
   {0,0,0,1},
   {1,0,0,1}
+};
+*/
+const uint8_t char_to_bin[10][4] = {
+  {0,0,0,0}, // 0
+  {1,0,0,1}, // 1
+  {0,0,0,1}, // 2
+  {1,1,1,0}, // 3
+  {0,1,1,0}, // 4
+  {1,0,1,0}, // 5
+  {0,0,1,0}, // 6
+  {1,1,0,0}, // 7
+  {0,1,0,0}, // 8
+  {1,0,0,0}  // 9
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -239,7 +255,7 @@ void startWebServer(){
     html += "<tr><td>WLAN Passwort:</td><td><input name='pass' type='password' value='";
     if(eeprom_pass.length() > 0) html += "***";
     html += "'></td></tr>";
-    html += "<tr><td colspan='2'><a href='#' onClick=\"document.getElementById('hidden1').style.display='table-row'; document.getElementById('hidden2').style.display='table-row'; document.getElementById('hidden3').style.display='table-row'; document.getElementById('hidden4').style.display='table-row'; document.getElementById('hidden5').style.display='table-row';\">Advanced Config</a></td></tr>";
+    html += "<tr><td colspan='2'><a href='#' onClick=\"document.getElementById('hidden1').style.display='table-row'; document.getElementById('hidden2').style.display='table-row'; document.getElementById('hidden3').style.display='table-row'; document.getElementById('hidden4').style.display='table-row'; document.getElementById('hidden5').style.display='table-row'; document.getElementById('hidden6').style.display='table-row';\">Advanced Config</a></td></tr>";
     html += "<tr id='hidden1' style='display: none'><td>NTP Server:</td><td><input name='ntpServer' value='";
     html += eeprom_ntpServer;
     html += "'></td></tr>";
@@ -255,6 +271,7 @@ void startWebServer(){
     html += "<tr id='hidden5' style='display: none'><td>Multiplex Leuchtdauer:</td><td><input name='multiplexInterval' value='";
     html += eeprom_multiplexInterval;
     html += "'></td></tr>";
+    html += "<tr id='hidden6' style='display: none'><td>Ziffern:</td><td><a href='/test'>Ziffern testen</a></td></tr>";
     html += "<tr><td><input type='submit' value='speichern'></form></td>";
     html += "<td><form method='post' action='clear' style='display:inline'><input type='submit' value='zur&uuml;cksetzen'></form></td></tr>";
     html += "</table></body></html>";
@@ -318,7 +335,6 @@ void startWebServer(){
     delay(100);
     ESP.restart();
   });
-
   server.on("/clear", []() {
     for (int i = 0; i < 501; i++) { 
       EEPROM.write(i, 0);
@@ -328,6 +344,49 @@ void startWebServer(){
     html = "<html><head><title>Nixie</title><meta http-equiv='refresh' content='10; url=/'></head><body>";
     html += "<h3>Nixie</h3>";
     html += "Einstellungen zur&uuml;ckgesetzt - starte neu..<br>";
+    html += "(wenn es nicht funktioniert, Uhr bitte hart restarten (Stecker ziehen))";
+    html += "</body></html>";
+    server.send(200, "text/html", html);
+    delay(100);
+    ESP.restart();
+  });
+  server.on("/test", []() {
+    html = "<html><head><title>Nixie</title></head><body>";
+    html += "<h3>Nixie</h3>";
+    html += "Teste alle Ziffern ..<br>";
+    html += "<a href='/restart'>Uhr restarten</a>";
+    html += "</body></html>";
+    server.send(200, "text/html", html);
+
+    uint8_t i = 0;
+    unsigned long previousMillis = 0;
+    while(true){
+      unsigned long currentMillis = millis();
+
+      if(currentMillis - previousMillis >= 1000){
+        previousMillis = currentMillis;
+
+        i++;
+        if(i == 10) i = 0;
+
+        display_value[5] = i;
+        display_value[4] = i;
+        display_value[3] = i;
+        display_value[2] = i;
+        display_value[1] = i;
+        display_value[0] = i;
+      }
+
+      // Show Value on Tubes
+      multiplex(display_value);
+
+      server.handleClient(); // Webserver
+    }
+  });
+  server.on("/restart", []() {
+    html = "<html><head><title>Nixie</title><meta http-equiv='refresh' content='10; url=/'></head><body>";
+    html += "<h3>Nixie</h3>";
+    html += "starte neu..<br>";
     html += "(wenn es nicht funktioniert, Uhr bitte hart restarten (Stecker ziehen))";
     html += "</body></html>";
     server.send(200, "text/html", html);
