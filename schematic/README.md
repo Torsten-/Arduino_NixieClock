@@ -28,3 +28,19 @@ R101, R102, R103, R104, R105, R106 | 4,7k 1W | 6 | [1W 4,7K](https://www.reichel
 
 
 Bohrer für die Nixies: 19 mm
+
+# Belegung Schieberegister
+Die Pin-Belegung ist leider etwas durcheinander geraten.
+
+Nixie Ziffer | Kabel Nummer | Schieberegister Ziffer | Schieberegister Pin | Bitmap (DCBA) | Bitmap (ABCD)
+-----|-----|-----|-----|-----|-----
+0 |  1 | 0 | 16 | 0000 | 0000
+9 |  2 | 1 | 15 | 0001 | 1000
+8 |  3 | 2 | 8 | 0010 | 0100
+7 |  4 | 3 | 9 | 0011 | 1100
+6 |  5 | 4 | 13 | 0100 | 0010
+5 |  6 | 5 | 14 | 0101 | 1010
+4 |  7 | 6 | 11 | 0110 | 0110
+3 |  8 | 7 | 10 | 0111 | 1110
+2 |  9 | 8 | 1 | 1000 | 0001
+1 | 10 | 9 | 2 | 1001 | 1001
